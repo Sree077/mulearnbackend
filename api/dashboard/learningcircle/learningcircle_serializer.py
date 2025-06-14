@@ -217,6 +217,7 @@ class CircleMeetingLogCreateEditSerializer(serializers.ModelSerializer):
         instance.report_description = validated_data.get(
             "report_description", instance.report_description
         )
+        instance.mode = validated_data.get("mode", instance.mode)
         instance.coord_x = validated_data.get("coord_x", instance.coord_x)
         instance.coord_y = validated_data.get("coord_y", instance.coord_y)
         instance.meet_place = validated_data.get("meet_place", instance.meet_place)
@@ -294,7 +295,9 @@ class CircleMeetingLogListSerializer(serializers.ModelSerializer):
     is_ended = serializers.SerializerMethodField()
 
     def get_is_started(self, obj):
-        return obj.meet_time <= DateTimeUtils.get_current_utc_time()
+        return (
+            obj.meet_time + timedelta(hours=1) <= DateTimeUtils.get_current_utc_time()
+        )
 
     def get_is_ended(self, obj):
         return (obj.meet_time + timedelta(hours=obj.duration + 1)) <= datetime.now(
@@ -348,6 +351,7 @@ class CircleMeetupInfoSerializer(serializers.ModelSerializer):
     attendees = serializers.SerializerMethodField()
     meet_code = serializers.SerializerMethodField()
     ig = serializers.CharField(source="circle_id.ig.name", read_only=True)
+    created_by_id = serializers.CharField(source="created_by.id", read_only=True)
 
     class Meta:
         model = CircleMeetingLog
@@ -370,6 +374,7 @@ class CircleMeetupInfoSerializer(serializers.ModelSerializer):
             "attendees",
             "is_member",
             "meet_code",
+            "created_by_id",
         ]
 
     def get_is_member(self, obj):
@@ -383,7 +388,9 @@ class CircleMeetupInfoSerializer(serializers.ModelSerializer):
         return obj.meet_code
 
     def get_is_started(self, obj):
-        return obj.meet_time <= DateTimeUtils.get_current_utc_time()
+        return (
+            obj.meet_time + timedelta(hours=1) <= DateTimeUtils.get_current_utc_time()
+        )
 
     def get_is_ended(self, obj):
         return (obj.meet_time + timedelta(hours=obj.duration + 1)) <= datetime.now(
@@ -432,78 +439,26 @@ class CircleMeetupInfoSerializer(serializers.ModelSerializer):
         return data
 
 
-class CircleMeetupMinSerializer(serializers.ModelSerializer):
+class CircleMeeupPublicSerializer(serializers.ModelSerializer):
     title = serializers.CharField(read_only=True)
-    coord_x = serializers.FloatField(read_only=True)
     org = serializers.CharField(source="circle_id.org.title", read_only=True)
-    coord_y = serializers.FloatField(read_only=True)
     meet_place = serializers.CharField(read_only=True)
     meet_time = serializers.DateTimeField(read_only=True)
-    meet_code = serializers.CharField(read_only=True)
-    circle_id = serializers.CharField(read_only=True)
     is_started = serializers.SerializerMethodField()
     is_ended = serializers.SerializerMethodField()
-    is_joined = serializers.SerializerMethodField()
-    attendees = serializers.SerializerMethodField()
-    created_by = serializers.CharField(source="created_by.full_name", read_only=True)
-    created_by_id = serializers.CharField(source="created_by.id", read_only=True)
     ig_id = serializers.CharField(source="circle_id.ig.id", read_only=True)
     ig_name = serializers.CharField(source="circle_id.ig.name", read_only=True)
+    created_by = serializers.CharField(source="created_by.full_name", read_only=True)
 
     def get_is_started(self, obj):
-        return obj.meet_time <= DateTimeUtils.get_current_utc_time()
+        return (
+            obj.meet_time + timedelta(hours=1) <= DateTimeUtils.get_current_utc_time()
+        )
 
     def get_is_ended(self, obj):
         return (obj.meet_time + timedelta(hours=obj.duration + 1)) <= datetime.now(
             timezone.utc
         )
-
-    def get_is_joined(self, obj):
-        if user_id := self.context.get("user_id"):
-            return obj.circle_meeting_attendance_meet_id.filter(
-                user_id=user_id
-            ).exists()
-        return False
-
-    def get_attendees(self, obj):
-        query = (
-            obj.circle_meeting_attendance_meet_id.select_related("user_id")
-            .prefetch_related("user_id__user_organization_link_user")
-            .only(
-                "user_id__full_name",
-                "is_joined",
-                "is_report_submitted",
-                "user_id__user_organization_link_user__org_id",
-            )[:3]
-        )
-        data = []
-        user_id = self.context.get("user_id")
-        cur_user_org = None
-        if user_id:
-            try:
-                cur_user = (
-                    User.objects.prefetch_related("user_organization_link_user")
-                    .only("user_organization_link_user__org_id")
-                    .get(id=user_id)
-                )
-                cur_user_org = cur_user.user_organization_link_user__org_id
-            except:
-                pass
-        for attendee in query:
-            data.append(
-                {
-                    "full_name": attendee.user_id.full_name,
-                    "is_joined": attendee.is_joined,
-                    "is_report_submitted": attendee.is_report_submitted,
-                    "profile_pic": attendee.user_id.profile_pic,
-                    "is_same_org": cur_user_org
-                    in attendee.user_id.user_organization_link_user.all().values_list(
-                        "org_id", flat=True
-                    ),
-                }
-            )
-        return data
-
 
     class Meta:
         model = CircleMeetingLog
@@ -516,7 +471,76 @@ class CircleMeetupMinSerializer(serializers.ModelSerializer):
             "ig_name",
             "mode",
             "meet_place",
-            "meet_code",
+            "circle_id",
+            "meet_time",
+            "meet_link",
+            "is_started",
+            "is_ended",
+            "created_by",
+        ]
+
+
+class CircleMeetupMinSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(read_only=True)
+    coord_x = serializers.FloatField(read_only=True)
+    org = serializers.CharField(source="circle_id.org.title", read_only=True)
+    coord_y = serializers.FloatField(read_only=True)
+    meet_place = serializers.CharField(read_only=True)
+    meet_time = serializers.DateTimeField(read_only=True)
+    # meet_code = serializers.CharField(read_only=True)
+    circle_id = serializers.CharField(read_only=True, source="circle_id.id")
+    is_started = serializers.SerializerMethodField()
+    is_ended = serializers.SerializerMethodField()
+    is_joined = serializers.SerializerMethodField()
+    is_rsvp = serializers.SerializerMethodField()
+    attendees_count = serializers.SerializerMethodField()
+    created_by = serializers.CharField(source="created_by.full_name", read_only=True)
+    created_by_id = serializers.CharField(source="created_by.id", read_only=True)
+    ig_id = serializers.CharField(source="circle_id.ig.id", read_only=True)
+    ig_name = serializers.CharField(source="circle_id.ig.name", read_only=True)
+
+    def get_is_started(self, obj):
+        return (
+            obj.meet_time + timedelta(hours=1) <= DateTimeUtils.get_current_utc_time()
+        )
+
+    def get_is_ended(self, obj):
+        return (obj.meet_time + timedelta(hours=obj.duration + 1)) <= datetime.now(
+            timezone.utc
+        )
+
+    def get_is_joined(self, obj):
+        if user_id := self.context.get("user_id"):
+            attendee = obj.circle_meeting_attendance_meet_id.filter(
+                user_id=user_id
+            ).first()
+            if attendee:
+                return attendee.is_joined
+        return False
+
+    def get_is_rsvp(self, obj):
+        if user_id := self.context.get("user_id"):
+            return obj.circle_meeting_attendance_meet_id.filter(
+                user_id=user_id
+            ).exists()
+        return False
+
+    def get_attendees_count(self, obj):
+        return obj.circle_meeting_attendance_meet_id.count()
+
+    class Meta:
+        model = CircleMeetingLog
+        fields = [
+            "id",
+            "title",
+            "description",
+            "org",
+            "ig_id",
+            "ig_name",
+            "mode",
+            "meet_place",
+            "is_rsvp",
+            # "meet_code",
             "circle_id",
             "coord_x",
             "coord_y",
@@ -525,7 +549,7 @@ class CircleMeetupMinSerializer(serializers.ModelSerializer):
             "is_started",
             "is_ended",
             "is_joined",
-            "attendees",
+            "attendees_count",
             "created_by",
-            "created_by_id"
+            "created_by_id",
         ]
